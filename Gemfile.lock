@@ -1,0 +1,19 @@
+PATH
+  remote: .
+  specs:
+    affect (0.1)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+    minitest (5.11.3)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  affect!
+  minitest (= 5.11.3)
+
+BUNDLED WITH
+   1.17.2
