@@ -1,14 +1,22 @@
+# frozen_string_literal: true
+
+# Affect module
 module Affect
   Abort = Object.new # Used as an abort intent
 
+  # Effect context
   class Context
     def initialize(&block)
       @closure = block
       @handlers = {}
     end
 
-    def on(o, &block)
-      o.is_a?(Hash) ? @handlers.merge!(o) : (@handlers[o] = block)
+    def on(effect, &block)
+      if effect.is_a?(Hash)
+        @handlers.merge!(effect)
+      else
+        @handlers[effect] = block
+      end
       self
     end
 
@@ -17,27 +25,27 @@ module Affect
       self
     end
 
-    def perform(o, *args)
-      if (handler = find_handler(o))
-        call_handler(handler, o, *args)
+    def perform(effect, *args)
+      if (handler = find_handler(effect))
+        call_handler(handler, effect, *args)
       elsif @parent_context
-        @parent_context.perform(o, *args)
+        @parent_context.perform(effect, *args)
       else
-        raise "No effect handler for #{o.inspect}"
+        raise "No effect handler for #{effect.inspect}"
       end
     end
 
-    def find_handler(o)
-      @handlers[o] || @handlers[o.class] || @handlers[nil]
+    def find_handler(effect)
+      @handlers[effect] || @handlers[effect.class] || @handlers[nil]
     end
 
-    def call_handler(handler, o, *args)
+    def call_handler(handler, effect, *args)
       if handler.arity == 0
-        handler.()
+        handler.call
       elsif args.empty?
-        handler.(o)
+        handler.call(effect)
       else
-        handler.(*args)
+        handler.call(*args)
       end
     end
 
@@ -50,48 +58,49 @@ module Affect
       @parent_context = current_thread[:__affect_context__]
       current_thread[:__affect_context__] = self
       catch(Abort) do
-        (block || @closure).()
+        (block || @closure).call
       end
     ensure
       current_thread[:__affect_context__] = @parent_context
     end
   end
 
-  def self.wrap(&block)
-    Context.new(&block)
-  end
+  class << self
+    def wrap(&block)
+      Context.new(&block)
+    end
 
-  def self.call(&block)
-    Context.new(&block).()
-  end
+    def call(&block)
+      Context.new(&block).call
+    end
 
-  def self.on(m, &block)
-    Context.new.on(m, &block)
-  end
+    def on(effect, &block)
+      Context.new.on(effect, &block)
+    end
 
-  def self.handle(&block)
-    Context.new.handle(&block)
-  end
+    def handle(&block)
+      Context.new.handle(&block)
+    end
 
-  def self.current_context
-    Thread.current[:__affect_context__] || (raise 'No effect context present')
-  end
+    def current_context
+      Thread.current[:__affect_context__] || (raise 'No effect context present')
+    end
 
-  def self.perform(o, *args)
-    current_context.perform(o, *args)
-  end
+    def perform(effect, *args)
+      current_context.perform(effect, *args)
+    end
 
-  def self.method_missing(m, *args)
-    perform(m, *args)
-  end
+    alias_method :method_missing, :perform
 
-  def self.abort!(value = nil)
-    current_context.abort!(value)
+    def abort!(value = nil)
+      current_context.abort!(value)
+    end
   end
 end
 
-module ::Kernel
-  def Affect(o, *args)
-    Affect.current_context.perform(o, *args)
+# Kernel extension
+module Kernel
+  def Affect(effect, *args)
+    Affect.current_context.perform(effect, *args)
   end
 end
