@@ -1,4 +1,4 @@
-# Affect - structured side effects for functional Ruby
+# Affect - algebraic effects for Ruby
 
 [INSTALL](#installing-affect) |
 [TUTORIAL](#getting-started) |
