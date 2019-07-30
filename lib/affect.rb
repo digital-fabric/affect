@@ -1,4 +1,6 @@
 module Affect
+  Abort = Object.new # Used as an abort intent
+
   class Context
     def initialize(&block)
       @closure = block
@@ -10,19 +12,23 @@ module Affect
       self
     end
 
-    def emit(o, *args)
-      # TODO
+    def handle(&block)
+      @handlers[nil] = block
+      self
+    end
+
+    def perform(o, *args)
       if (handler = find_handler(o))
         call_handler(handler, o, *args)
       elsif @parent_context
-        @parent_context.emit(o, *args)
+        @parent_context.perform(o, *args)
       else
         raise "No effect handler for #{o.inspect}"
       end
     end
 
     def find_handler(o)
-      @handlers[o] || @handlers[o.class]
+      @handlers[o] || @handlers[o.class] || @handlers[nil]
     end
 
     def call_handler(handler, o, *args)
@@ -35,18 +41,23 @@ module Affect
       end
     end
 
+    def abort!(value = nil)
+      throw Abort, (value || Abort)
+    end
+
     def call(&block)
       current_thread = Thread.current
       @parent_context = current_thread[:__affect_context__]
       current_thread[:__affect_context__] = self
-      (block || @closure).()
+      catch(Abort) do
+        (block || @closure).()
+      end
     ensure
       current_thread[:__affect_context__] = @parent_context
-      @parent_context = nil
     end
   end
 
-  def self.run(&block)
+  def self.wrap(&block)
     Context.new(&block)
   end
 
@@ -58,21 +69,29 @@ module Affect
     Context.new.on(m, &block)
   end
 
-  def self.emit(o, *args)
-    current_thread = Thread.current
-    current_context = current_thread[:__affect_context__]
-    raise "No effect context present" unless current_context
+  def self.handle(&block)
+    Context.new.handle(&block)
+  end
 
-    current_context.emit(o, *args)
+  def self.current_context
+    Thread.current[:__affect_context__] || (raise 'No effect context present')
+  end
+
+  def self.perform(o, *args)
+    current_context.perform(o, *args)
+  end
+
+  def self.method_missing(m, *args)
+    perform(m, *args)
+  end
+
+  def self.abort!(value = nil)
+    current_context.abort!(value)
   end
 end
 
 module ::Kernel
   def Affect(o, *args)
-    current_thread = Thread.current
-    current_context = current_thread[:__affect_context__]
-    raise "No effect context present" unless current_context
-
-    current_context.emit(o, *args)
+    Affect.current_context.perform(o, *args)
   end
 end
