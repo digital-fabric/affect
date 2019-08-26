@@ -2,36 +2,28 @@
 
 # Affect module
 module Affect
-  Abort = Object.new # Used as an abort intent
+  extend self
 
-  # Effect context
+  # Implements an effects context
   class Context
-    def initialize(&block)
-      @closure = block
-      @handlers = {}
+    def initialize(handlers = nil, &block)
+      @handlers = handlers || { nil => block || -> {} }
     end
 
-    def on(effect, &block)
-      if effect.is_a?(Hash)
-        @handlers.merge!(effect)
-      else
-        @handlers[effect] = block
-      end
-      self
-    end
+    attr_reader :handlers
 
-    def handle(&block)
-      @handlers[nil] = block
-      self
+    def handler_proc
+      proc { |effect, *args| handle(effect, *args) }
     end
 
     def perform(effect, *args)
-      if (handler = find_handler(effect))
+      handler = find_handler(effect)
+      if handler
         call_handler(handler, effect, *args)
-      elsif @parent_context
-        @parent_context.perform(effect, *args)
+      elsif @parent
+        @parent.perform(effect, *args)
       else
-        raise "No effect handler for #{effect.inspect}"
+        raise "No handler found for #{effect.inspect}"
       end
     end
 
@@ -40,7 +32,7 @@ module Affect
     end
 
     def call_handler(handler, effect, *args)
-      if handler.arity == 0
+      if handler.arity.zero?
         handler.call
       elsif args.empty?
         handler.call(effect)
@@ -49,58 +41,65 @@ module Affect
       end
     end
 
-    def abort!(value = nil)
-      throw Abort, (value || Abort)
+    @@current = nil
+    def self.current
+      @@current
     end
 
-    def call(&block)
-      current_thread = Thread.current
-      @parent_context = current_thread[:__affect_context__]
-      current_thread[:__affect_context__] = self
-      catch(Abort) do
-        (block || @closure).call
-      end
+    def capture
+      @parent, @@current = @@current, self
+      catch(:escape) { yield }
     ensure
-      current_thread[:__affect_context__] = @parent_context
+      @@current = @parent
+    end
+
+    def escape(value = nil)
+      throw :escape, (block_given? ? yield : value)
     end
   end
 
-  class << self
-    def wrap(&block)
-      Context.new(&block)
+  def capture(*args, &block)
+    block, handlers = block_and_handlers_from_args(*args, &block)
+    handlers = { nil => handlers } if handlers.is_a?(Proc)
+    Context.new(handlers).capture(&block)
+  end
+
+  def block_and_handlers_from_args(*args, &block)
+    case args.size
+    when 1 then block ? [block, args.first] : [args.first, nil]
+    when 2 then args
+    else [block, nil]
+    end
+  end
+
+  def perform(effect, *args)
+    unless (ctx = Context.current)
+      raise 'perform called outside capture block'
     end
 
-    def call(&block)
-      Context.new(&block).call
+    ctx.perform(effect, *args)
+  end
+
+  def escape(value = nil, &block)
+    unless (ctx = Context.current)
+      raise 'escape called outside capture block'
     end
 
-    def on(effect, &block)
-      Context.new.on(effect, &block)
-    end
+    ctx.escape(value, &block)
+  end
 
-    def handle(&block)
-      Context.new.handle(&block)
-    end
+  def respond_to_missing?(*)
+    true
+  end
 
-    def current_context
-      Thread.current[:__affect_context__] || (raise 'No effect context present')
-    end
-
-    def perform(effect, *args)
-      current_context.perform(effect, *args)
-    end
-
-    alias_method :method_missing, :perform
-
-    def abort!(value = nil)
-      current_context.abort!(value)
-    end
+  def method_missing(*args)
+    perform(*args)
   end
 end
 
-# Kernel extension
+# Kernel extensions
 module Kernel
-  def Affect(effect, *args)
-    Affect.current_context.perform(effect, *args)
+  def Affect(handlers = nil, &block)
+    Affect::Context.new(handlers, &block)
   end
 end

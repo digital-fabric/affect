@@ -4,130 +4,138 @@ require 'minitest/autorun'
 require 'bundler/setup'
 require 'affect'
 
-class AffectAPITest < Minitest::Test
-  def test_that_perform_raises_on_no_handler
-    assert_raises RuntimeError do
-      Affect.wrap {
-        Affect.perform :foo
-      }.on(:bar) {
-        :baz
-      }.()
-    end
+class AffectTest < Minitest::Test
+  include Affect
 
-    # using method call on Affect
-    assert_raises RuntimeError do
-      Affect.wrap {
-        Affect.foo
-      }.()
-    end
+  def test_capture_with_different_arities
+    assert_equal :foo, capture { :foo }
+    assert_equal :foo, capture(-> { :foo })
+    
+    assert_equal :bar, capture(-> { perform(:foo) }, ->(e) { e == :foo && :bar })
 
-    # no raise
-    Affect.wrap {
-      Affect.perform :foo
-    }.on(:foo) {
-      :bar
-    }.()
   end
 
-  def test_that_emitted_effect_is_performed
-    counter = 0
-    Affect.wrap {
-      3.times { Affect.perform :incr }
-    }.on(:incr) {
-      counter += 1
-    }.()
+  def test_escape
+    assert_raises(RuntimeError) { escape(:foo) }
+    assert_raises(RuntimeError) { escape { :foo } }
 
-    assert_equal(3, counter)
+    assert_equal :bar, capture { [:foo, escape(:bar)] }
+    assert_equal :baz, capture { [:foo, escape { :baz }] }
   end
 
-  def test_that_api_methods_return_context
-    o = Affect.wrap {
-      Affect.perform :foo
-    }
-    assert_kind_of(Affect::Context, o)
+  def test_effect_handler_dsl
+    v = 1
+    ctx = Affect(
+      get: -> { v },
+      set: ->(x) { v = x }
+    )
 
-    o = Affect.on(:foo) {
-      :bar
-    }
-    assert_kind_of(Affect::Context, o)
+    assert_kind_of Affect::Context, ctx
 
-    o = Affect.handle { }
-    assert_kind_of(Affect::Context, o)
+    final = ctx.capture {
+      [
+        perform(:get),
+        perform(:set, 2),
+        perform(:get),
+        Affect.get,
+        Affect.set(3),
+        Affect.get
+      ]
+    }
+
+    assert_equal [1, 2, 2, 2, 3, 3], final
+  end
+
+  def test_context_missing_handler
+    assert_raises RuntimeError do
+      Affect(foo: -> { :bar }).capture { perform :baz }
+    end
+  end
+
+  def test_context_wildcard_handler
+    ctx = Affect do |e| e + 1; end
+    assert_equal 3, ctx.capture { perform(2) }
   end
 
   def test_that_contexts_can_be_nested
     results = []
-    o = Affect.wrap {
-      Affect.perform :foo
-      Affect.perform :bar
 
-      Affect.wrap {
-        Affect.perform :foo
-        Affect.perform :bar
-      }
-      .on(:bar) { results << :baz }
-      .()
-    }
-    .on(:foo) { results << :foo }
-    .on(:bar) { results << :bar }
-    .()
+    ctx2 = Affect(bar: -> { results << :baz })
+    ctx1 = Affect(
+      foo: -> { results << :foo },
+      bar: -> { results << :bar }
+    )
 
-    assert_equal([:foo, :bar, :foo, :baz], results)
-  end
-
-  def test_that_effects_can_be_emitted_as_method_calls_on_Affect
-    results = []
-    o = Affect.wrap {
+    ctx1.capture {
       Affect.foo
       Affect.bar
 
-      Affect.wrap {
+      ctx2.capture {
         Affect.foo
         Affect.bar
       }
-      .on(:bar) { results << :baz }
-      .()
     }
-    .on(:foo) { results << :foo }
-    .on(:bar) { results << :bar }
-    .()
 
     assert_equal([:foo, :bar, :foo, :baz], results)
   end
 
-  def test_that_abort_can_be_called_from_wrapped_code
-    effects = []
-    Affect.handle { |o| effects << o }.() do
-      Affect 1
-      Affect.abort!
-      Affect 2
-    end
-
-    assert_equal([1], effects)
-  end
-
-  def test_that_abort_causes_call_to_return_optional_value
-    o = Affect.() { Affect.abort! }
-    assert_equal(Affect::Abort, o)
-
-    o = Affect.() { Affect.abort!(42) }
-    assert_equal(42, o)
+  def test_that_escape_provides_return_value_of_capture
+    assert_equal 42, capture { 2 * escape { 42 } }
   end
 
   class I1; end
-
   class I2; end
 
   def test_that_intent_instances_are_handled_correctly
     results = []
-    Affect
-      .on(I1) { results << :i1 }
-      .on(I2) { results << :i2 }
-      .() {
-        Affect I1.new
-        Affect I2.new
+    Affect(
+      I1 => -> { results << :i1 },
+      I2 => -> { results << :i2 }
+    ).capture {
+      perform I1.new
+      perform I2.new
     }
 
     assert_equal([:i1, :i2], results)
+  end
+
+  # doesn't work with callback-based affect
+  def test_that_capture_can_work_across_fibers_with_transfer
+    require 'fiber'
+    f1 = Fiber.new { |f| escape(:foo) }
+    f2 = Fiber.new { f1.transfer(f2) }
+
+    # assert_equal :foo, capture { f2.resume }
+  end
+
+  # doesn't work with fiber-based Affect
+  def test_that_capture_can_work_across_fibers_with_yield
+    f1 = Fiber.new { |f| escape(:foo) }
+    f2 = Fiber.new { f1.resume }
+
+    # assert_equal :foo, capture { f2.resume }
+  end
+end
+
+class ContTest < Minitest::Test
+  require 'affect/cont'
+
+  Cont = Affect::Cont
+
+  def test_that_continuation_is_provided_to_escape
+    k = Cont.capture { 2 * Cont.escape { |cont| cont } }
+    assert_kind_of Proc, k
+  end
+
+  def test_that_continuation_completes_the_computation_in_capture
+    k = Cont.capture { 2 * Cont.escape { |cont| cont } }
+    assert_equal 12, k.(6)
+  end
+
+  def test_that_continuation_can_be_called_multiple_times
+    k = Cont.capture { 2 * Cont.escape { |cont| cont } }
+    assert_equal 4, k.(2)
+    assert_equal 6, k.(3)
+    assert_equal 8, k.(4)
   end
 end
