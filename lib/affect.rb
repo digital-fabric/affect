@@ -16,12 +16,12 @@ module Affect
       proc { |effect, *args| handle(effect, *args) }
     end
 
-    def perform(effect, *args)
+    def perform(effect, *args, &block)
       handler = find_handler(effect)
       if handler
-        call_handler(handler, effect, *args)
+        call_handler(handler, effect, *args, &block)
       elsif @parent
-        @parent.perform(effect, *args)
+        @parent.perform(effect, *args, &block)
       else
         raise "No handler found for #{effect.inspect}"
       end
@@ -31,13 +31,13 @@ module Affect
       @handlers[effect] || @handlers[effect.class] || @handlers[nil]
     end
 
-    def call_handler(handler, effect, *args)
+    def call_handler(handler, effect, *args, &block)
       if handler.arity.zero?
-        handler.call
+        handler.call(&block)
       elsif args.empty?
-        handler.call(effect)
+        handler.call(effect, &block)
       else
-        handler.call(*args)
+        handler.call(*args, &block)
       end
     end
 
@@ -72,12 +72,12 @@ module Affect
     end
   end
 
-  def perform(effect, *args)
+  def perform(effect, *args, &block)
     unless (ctx = Context.current)
       raise 'perform called outside capture block'
     end
 
-    ctx.perform(effect, *args)
+    ctx.perform(effect, *args, &block)
   end
 
   def escape(value = nil, &block)

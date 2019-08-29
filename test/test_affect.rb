@@ -57,6 +57,12 @@ class AffectTest < Minitest::Test
     assert_equal 3, ctx.capture { perform(2) }
   end
 
+  def test_context_handler_with_block
+    assert_equal :bar, Affect(foo: -> &block { block.() }).capture {
+      perform(:foo) { :bar }
+    }
+  end
+
   def test_that_contexts_can_be_nested
     results = []
 
