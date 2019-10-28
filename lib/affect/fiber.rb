@@ -32,7 +32,7 @@ module Affect
         else [block, nil]
       end
 
-      f = Fiber.new(&block)
+      f = ::Fiber.new(&block)
       v = f.resume
       loop do
         break v unless f.alive? && v.is_a?(Intent)
@@ -46,14 +46,14 @@ module Affect
     end
 
     def perform(*args)
-      Fiber.yield Intent.new(*args)
+      ::Fiber.yield Intent.new(*args)
     rescue FiberError
       raise RuntimeError, 'perform called outside of capture'
     end
 
     def escape(value = nil, &block)
       block ||= proc { value }
-      Fiber.yield Escape.new(&block)
+      ::Fiber.yield Escape.new(&block)
     rescue FiberError
       raise RuntimeError, 'escape called outside of capture'
     end
@@ -79,7 +79,7 @@ module Affect
           call_handler(handler, effect, *args)
         else
           begin
-            Fiber.yield Intent.new(effect, *args)
+            ::Fiber.yield Intent.new(effect, *args)
           rescue FiberError
             raise RuntimeError, "No handler found for #{effect.inspect}"
           end
