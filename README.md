@@ -36,7 +36,7 @@ Or install it manually, you know the drill.
 Algebraic effects introduces the concept of effect handlers, little pieces of
 code that are provided by the caller, and invoked by the callee using a uniform
 interface. An example of algebraic effects might be logging. Normally, if we
-wanted to log a certain message to `STDOUT` or to a file, we wold do the
+wanted to log a certain message to `STDOUT` or to a file, we would do the
 following:
 
 ```ruby
